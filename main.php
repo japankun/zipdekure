@@ -1,12 +1,12 @@
 <?php
-error_reporting(0);
+//error_reporting(0);
 
 define("_HOST", "jbbs.shitaraba.net");
-define("_INTERVAL", 500000);
+define("_INTERVAL", 1);
 
 class Shitaraba {
 
-    public $category, $address;
+    public $category, $address, $saveDir;
     private $setting;
 
     function __construct () {
@@ -22,7 +22,6 @@ class Shitaraba {
         $subject = $this->getSubjectTxt();
 
         $listData = $this->generateDatURLs($subject);
-
 
         print "ThreadCount: " . count($listData) . "\n";
         $this->download($listData);
@@ -41,6 +40,7 @@ class Shitaraba {
 
             $this->category = $matchs[2];
             $this->address = $matchs[3];
+            $this->saveDir = "./" . $this->category . "_" . $this->address . "/";
 
             return true;
         }
@@ -113,7 +113,8 @@ class Shitaraba {
                     "threadkey" => $matchs[1],
                     "title" => $matchs[2],
                     "count" => $matchs[3],
-                    "datURL" => "https://"._HOST."/bbs/rawmode.cgi/".$this->setting->DIR."/".$this->setting->BBS."/".$matchs[1]."/"
+                    "datURL" => "https://"._HOST."/bbs/rawmode.cgi/".
+                        $this->setting->DIR."/".$this->setting->BBS."/".$matchs[1]."/"
                 );
 
             }
@@ -139,46 +140,89 @@ class Shitaraba {
     function download ($listData) {
 
         foreach ($listData as $data) {
-            $this->getDat($data);
-            usleep(_INTERVAL);
+
+            if ($this->getDat($data) != -1)
+                sleep(_INTERVAL);
+
         }
 
         return;
 
     }
 
-    function getDat ($data) {
+    private function getDat ($data) {
 
-        // timeout 10sec
-        $options = stream_context_create(array( 
-            'http' => array( 
-                'timeout' => 15
+        $data["cache"] = $this->cacheStatus($data);
+        
+        print $data["datURL"];
+
+        if ($data["cache"]) {
+
+            print " ".str_pad($data["cache"]["count"], 4, " ", STR_PAD_LEFT)." / "
+                . str_pad($data["count"], 4, " ", STR_PAD_LEFT) . " SKIP\n";
+
+            if ($data["cache"]["count"] == $data["count"]) {
+                return -1;
+            } else if ($data["cache"]["count"] != $data["cache"]["last"]) {
+                $data["cache"] = false;
+            }
+            
+        } else {
+
+            print " .... ";
+
+        }
+
+        $options = stream_context_create(
+            array( 
+                'http' => array( 
+                    'timeout' => 10
                 )
             )
         );
 
-        print $data["datURL"] . " ... ";
+        $rawdat = file_get_contents($data["datURL"], 0, $options);
 
-        $dat = file_get_contents($data["datURL"], 0, $options);
-
-        if (!$dat) {
+        if (!$data["cache"] && !$rawdat) {
             die("ERR timeout\n");
         }
 
-        if (!is_dir("./" . $this->category . "_" . $this->address . "/"))
-            mkdir("./" . $this->category . "_" . $this->address . "/");
+        if (!is_dir($this->saveDir))
+            mkdir($this->saveDir);
 
-        file_put_contents("./" . $this->category . "_" . $this->address . "/" . $data["threadkey"].".dat", $dat);
+        if ($data["cache"]) {
+            file_put_contents($this->saveDir . $data["threadkey"] . ".dat", $rawdat, FILE_APPEND);
+        } else {
+            file_put_contents($this->saveDir . $data["threadkey"] . ".dat", $rawdat);
+        }
 
-        print strlen($dat) . " bytes OK\n";
+        print strlen($rawdat) . " bytes OK\n";
 
         return;
+
+    }
+
+    private function cacheStatus ($data) {
+
+        if (file_exists($this->saveDir . $data["threadkey"].".dat")) {
+
+            $datfile = file($this->saveDir . $data["threadkey"].".dat");
+
+            $resCount = count($datfile);
+            $lastLine = explode("<>", array_pop($datfile));
+
+            return array("count" => $resCount, "last" => $lastLine[0]);
+
+        } else {
+            return false;
+
+        }
 
     }
 
     function exportSetting () {
 
-        file_put_contents("./" . $this->category . "_" . $this->address . "./setting.json", json_encode($this->setting, JSON_UNESCAPED_UNICODE));
+        file_put_contents($this->saveDir . "setting.json", json_encode($this->setting, JSON_UNESCAPED_UNICODE));
 
         return;
 
@@ -186,14 +230,16 @@ class Shitaraba {
 
     function exportHeadTxt ($head) {
 
-        file_put_contents("./" . $this->category . "_" . $this->address . "./head.txt", $head);
+        file_put_contents($this->saveDir . "head.txt", $head);
 
     }
 
     function archiveZip () {
 
         $zip = new ZipArchive();
-        $ret = $zip->open($this->category . "_" . $this->address ."_". $_SERVER['REQUEST_TIME'].".zip", ZipArchive::CREATE | ZipArchive::OVERWRITE);
+        $ret = $zip->open($this->category . "_" . $this->address ."_". $_SERVER['REQUEST_TIME'].".zip",
+            ZipArchive::CREATE | ZipArchive::OVERWRITE
+        );
 
         if ($ret !== TRUE) {
             printf('Failed with code %d', $ret);
@@ -204,7 +250,7 @@ class Shitaraba {
             $zip->addGlob("./" . $this->category . "_" . $this->address."/*.{dat,txt,json}", GLOB_BRACE, $options);
             $zip->close();
 
-            print "Saved: ". $this->category . "_" . $this->address ."_". $_SERVER['REQUEST_TIME'].".zip";
+            print "Saved: ". $this->category . "_" . $this->address ."_". $_SERVER['REQUEST_TIME'].".zip\n";
 
         }
 
@@ -216,6 +262,5 @@ class Shitaraba {
 
 $shitaraba = new Shitaraba();
 $shitaraba->main();
-
 
 ?>
