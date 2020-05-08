@@ -4,6 +4,7 @@
 ### 動作環境
 - PHP7
 - ZipArchive
+- mbstring
 
 #### 使い方
 `php ./main.php https://jbbs.shitaraba.net/computer/10298/`
